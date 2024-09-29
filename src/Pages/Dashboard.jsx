@@ -1,117 +1,115 @@
 import React, { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-import { collection, addDoc, getDocs, doc, deleteDoc } from 'firebase/firestore';
+import { useForm } from "react-hook-form";
+import { collection, addDoc, getDocs, doc, deleteDoc, query, where } from "firebase/firestore";
 import { db } from '../Config/firebase/firebaseconfig';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../Config/firebase/firebaseconfig';
 
 const Dashboard = () => {
-  const [data, setData] = useState([]); // For storing blog data
-  const [loading, setLoading] = useState(true); // For loading state
-  const [isSubmitting, setIsSubmitting] = useState(false); // For form submission state
+  const [data, setData] = useState([]);
+  const [uid, setUid] = useState(null);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm();
-
-  // Fetch data from Firestore
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const querySnapshot = await getDocs(collection(db, 'Blogs'));
-      const userBlog = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setData(userBlog);
-    } catch (error) {
-      console.error('Error fetching data: ', error);
-      alert('Error fetching data: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm();
 
   useEffect(() => {
-    fetchData(); // Fetch data on component mount
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUid(user.uid);
+        console.log("User UID:", user.uid);
+        getData(user.uid);
+      } else {
+        console.log("User not authenticated");
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Delete a blog by its ID
-  const deleteBlog = async (id) => {
+  const getData = async (userId) => {
+    if (!userId) return;
+    const q = query(collection(db, "Blogs"), where("userId", "==", userId));
     try {
-      await deleteDoc(doc(db, 'Blogs', id));
-      console.log('Document successfully deleted!');
-      fetchData(); // Refresh data after deletion
+      const querySnapshot = await getDocs(q);
+      const userBlog = [];
+      querySnapshot.forEach((doc) => {
+        userBlog.push({ id: doc.id, ...doc.data() });
+      });
+      setData(userBlog);
     } catch (error) {
-      console.error('Error deleting document: ', error);
-      alert('Error deleting document: ' + error.message);
+      console.error("Error fetching blogs: ", error);
     }
   };
 
-  // Add a new blog
-  const onSubmit = async (formData) => {
-    setIsSubmitting(true);
+  const deleteBlog = async (id) => {
     try {
-      await addDoc(collection(db, 'Blogs'), {
-        Title: formData.Title,
-        mind: formData.mind,
-      });
-      console.log('Document added successfully');
-      fetchData(); // Refresh data after adding
-      reset(); // Reset form fields
+      await deleteDoc(doc(db, "Blogs", id));
+      console.log("Item Deleted");
+      if (uid) getData(uid);
     } catch (error) {
-      console.error('Error adding document: ', error);
-      alert('Error adding document: ' + error.message);
-    } finally {
-      setIsSubmitting(false);
+      console.error("Error", error);
     }
+  };
+
+  const render = async (formData) => {
+    if (!uid) return;
+
+    const addData = async () => {
+      try {
+        const docRef = await addDoc(collection(db, "Blogs"), {
+          Title: formData.Title,
+          mind: formData.mind,
+          userId: uid,
+        });
+        console.log("Document written with ID: ", docRef.id);
+      } catch (error) {
+        console.error("Error adding document: ", error);
+      }
+    };
+    await addData();
+    reset();
+    getData(uid);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center"> {/* Full-screen background */}
+    <div className="bg-white min-h-screen"> {/* Full white background */}
       <h1 className="m-5 mt-3 text-2xl font-bold">Dashboard</h1>
-
-      {/* Form for submitting a new blog */}
-      <div className="flex flex-col items-center justify-center">
-        <form onSubmit={handleSubmit(onSubmit)} className="w-full max-w-xs">
+      <div className="flex flex-col items-center justify-center ">
+        <form onSubmit={handleSubmit(render)} className="w-full max-w-xs">
           <input
             type="text"
             placeholder="Title"
             className="input input-bordered w-full mb-4 bg-white hover:border-violet-600"
-            {...register('Title', { required: true })}
+            {...register("Title", { required: true })}
           />
           {errors.Title && <span className="text-red-500">This field is required</span>}
-
           <textarea
             cols="100"
             rows="5"
             placeholder="What is on your mind"
             className="border border-neutral-300 p-4 w-full mb-4 bg-white hover:border-violet-600"
-            {...register('mind', { required: true })}
+            {...register("mind", { required: true })}
           ></textarea>
-          {errors.mind && <span className="text-red-500">This field is required</span>}
-
-          <button className="btn btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? "Publishing..." : "Publish Blog"}
-          </button>
+          {errors.mind && <span className="text-red-500">This field is required</span>} <br />
+          <button className="btn btn-primary">Publish Blog</button>
         </form>
       </div>
-
-      {/* Display the list of blogs */}
       <div className="max-w-2xl mx-auto p-4">
-        <h1 className="text-center text-3xl font-bold mb-4 mt-5">Blogs</h1>
-
-        {loading ? (
-          <h1 className="text-center text-lg text-gray-500">
-            <span className="loading loading-spinner loading-lg"></span> Loading...
-          </h1>
-        ) : data.length > 0 ? (
+        <h1 className='text-center text-3xl font-bold mb-4 mt-5'>Blogs</h1>
+        {data.length > 0 ? (
           data.map((item) => (
             <div key={item.id} className="bg-white shadow-lg rounded-lg p-6 mb-4 hover:shadow-xl transition-shadow duration-300">
               <h2 className="text-xl font-semibold mb-2">{item.Title}</h2>
               <p className="text-gray-700">{item.mind}</p>
-
-              <button className="btn btn-success mt-4 m-2">Edit</button>
-              <button className="btn btn-error mt-4 m-2" onClick={() => deleteBlog(item.id)}>
-                Delete
-              </button>
+              <button className='btn btn-error mt-4 m-2' onClick={() => deleteBlog(item.id)}>Delete</button>
             </div>
           ))
         ) : (
-          <h1 className="text-center text-lg text-gray-500">No Blogs Found</h1>
+          <h1 className="text-center text-lg text-gray-500">Add A Blog</h1>
         )}
       </div>
     </div>
